@@ -189,4 +189,28 @@ class AudioCaptureService : Service() {
             Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("日語翻譯字幕")
                 .setContentText("正在擷取系統音訊並翻譯...")
-                .setSmallIcon(android.R.drawab
+                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .build()
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+                .setContentTitle("日語翻譯字幕")
+                .setContentText("正在擷取系統音訊並翻譯...")
+                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .build()
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        captureJob?.cancel()
+        audioRecord?.stop()
+        audioRecord?.release()
+        audioRecord = null
+        mediaProjection?.stop()
+        mediaProjection = null
+        VoiceRecogHelper.release()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+}
