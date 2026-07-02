@@ -29,13 +29,22 @@
         android:id="@+id/tvStatus"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="狀態：就緒"
+        android:text="狀態：準備中，正在下載必要模型..."
         android:textSize="16sp"
         android:textColor="#FFD700"
         android:gravity="center"
-        android:layout_marginBottom="24dp"
+        android:layout_marginBottom="8dp"
         android:padding="12dp"
         android:background="#22ffffff" />
+
+    <ProgressBar
+        android:id="@+id/progressDownload"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="100"
+        android:progress="0"
+        android:layout_marginBottom="24dp" />
 
     <Button
         android:id="@+id/btnFloatPerm"
@@ -49,9 +58,10 @@
         android:id="@+id/btnStart"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="開始翻譯"
+        android:text="模型下載中，請稍候..."
         android:textSize="18sp"
         android:textStyle="bold"
+        android:enabled="false"
         android:layout_marginBottom="12dp" />
 
     <Button
@@ -64,7 +74,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="\n使用說明：\n1. 先開啟懸浮窗權限\n2. 點擊開始翻譯，授予錄製權限\n3. 打開直播APP即可看到懸浮字幕\n4. 字幕可以拖動調整位置"
+        android:text="\n使用說明：\n1. 先開啟懸浮窗權限\n2. 點擊開始翻譯，授予錄製權限\n3. 打開直播APP即可看到懸浮字幕\n4. 字幕可以拖動調整位置\n5. 首次使用需要下載語音與翻譯模型（約 50~80MB），請保持網路連線"
         android:textSize="13sp"
         android:textColor="#666666"
         android:layout_marginTop="32dp" />

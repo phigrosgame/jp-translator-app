@@ -33,7 +33,7 @@ object VoiceRecogHelper {
         }
     }
 
-    fun downloadModel(context: Context, onDone: (() -> Unit)? = null) {
+    fun downloadModel(context: Context, onProgress: ((Int) -> Unit)? = null, onDone: (() -> Unit)? = null) {
         if (isModelReady || isDownloading) return
         isDownloading = true
 
@@ -43,7 +43,7 @@ object VoiceRecogHelper {
                 if (!modelDir.exists() || modelDir.list().isNullOrEmpty()) {
                     Log.d(TAG, "開始下載日語語音模型...")
                     val zipFile = File(context.filesDir, "vosk-model.zip")
-                    downloadFile(MODEL_URL, zipFile)
+                    downloadFile(MODEL_URL, zipFile, onProgress)
                     unzip(zipFile, context.filesDir)
                     zipFile.delete()
                     Log.d(TAG, "日語語音模型下載完成")
@@ -70,18 +70,30 @@ object VoiceRecogHelper {
         }
     }
 
-    private fun downloadFile(urlStr: String, dest: File) {
+   private fun downloadFile(urlStr: String, dest: File, onProgress: ((Int) -> Unit)?) {
         val conn = URL(urlStr).openConnection() as HttpURLConnection
         conn.connectTimeout = 30000
         conn.readTimeout = 30000
         conn.connect()
+
+        val totalSize = conn.contentLength
+        var downloaded = 0
+
         conn.inputStream.use { input ->
             FileOutputStream(dest).use { output ->
-                input.copyTo(output)
+                val buffer = ByteArray(8192)
+                var bytesRead: Int
+                while (input.read(buffer).also { bytesRead = it } != -1) {
+                    output.write(buffer, 0, bytesRead)
+                    downloaded += bytesRead
+                    if (totalSize > 0) {
+                        val percent = (downloaded * 100L / totalSize).toInt()
+                        onProgress?.invoke(percent)
+                    }
+                }
             }
         }
     }
-
     private fun unzip(zipFile: File, targetDir: File) {
         ZipInputStream(zipFile.inputStream()).use { zis ->
             var entry = zis.nextEntry

@@ -5,15 +5,15 @@ import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.widget.Button
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
@@ -21,19 +21,22 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnStart: Button
     private lateinit var btnStop: Button
     private lateinit var tvStatus: TextView
+    private lateinit var progressDownload: ProgressBar
 
-    // 录屏授权结果
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    @Volatile private var isVoiceModelReady = false
+    @Volatile private var isTranslateModelReady = false
+
     private var resultCode = -1
     private var resultData: Intent? = null
 
     companion object {
-    // 用 Int.MIN_VALUE 當「尚未授權」的哨兵值，避免跟 RESULT_OK(-1) 撞值
-    	const val NO_RESULT = Int.MIN_VALUE
-    	var sharedResultCode: Int = NO_RESULT
-    	var sharedResultData: Intent? = null
+        const val NO_RESULT = Int.MIN_VALUE
+        var sharedResultCode: Int = NO_RESULT
+        var sharedResultData: Intent? = null
     }
 
-    // 请求悬浮窗权限
     private val overlayPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
@@ -46,7 +49,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // 请求录屏/音频捕获权限
     private val mediaProjectionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -54,18 +56,15 @@ class MainActivity : AppCompatActivity() {
             resultCode = result.resultCode
             resultData = result.data
 
-            // 保存到全局变量
             sharedResultCode = resultCode
             sharedResultData = resultData
 
-            // 启动服务
             startTranslation()
         } else {
             Toast.makeText(this, "需要媒體投影權限才能擷取系統音訊", Toast.LENGTH_LONG).show()
         }
     }
 
-    // 请求麦克风权限
     private val audioPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -84,8 +83,10 @@ class MainActivity : AppCompatActivity() {
         btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
         tvStatus = findViewById(R.id.tvStatus)
+        progressDownload = findViewById(R.id.progressDownload)
 
-        // 初始化翻译和语音识别模型
+        btnStart.isEnabled = false
+
         initModels()
 
         btnFloatPerm.setOnClickListener {
@@ -102,16 +103,58 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun initModels() {
-        CoroutineScope(Dispatchers.IO).launch {
-            // 预加载翻译模型
-            TranslateHelper.init(this@MainActivity)
-            // 预下载语音识别模型
-            VoiceRecogHelper.downloadModel(this@MainActivity)
+        updateDownloadStatus()
+
+        // 翻译模型（MLKit，无逐字节进度，只有完成/失败回呼）
+        TranslateHelper.init(this@MainActivity) { success ->
+            mainHandler.post {
+                isTranslateModelReady = true
+                if (!success) {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "翻譯模型下載失敗，請確認已連接 Wi-Fi 後重新打開 App",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+                updateDownloadStatus()
+            }
+        }
+
+        // 语音辨识模型（Vosk，有下载进度）
+        VoiceRecogHelper.downloadModel(
+            context = this@MainActivity,
+            onProgress = { percent ->
+                mainHandler.post {
+                    progressDownload.progress = percent
+                    tvStatus.text = "狀態：正在下載語音模型... $percent%"
+                }
+            },
+            onDone = {
+                mainHandler.post {
+                    isVoiceModelReady = true
+                    updateDownloadStatus()
+                }
+            }
+        )
+    }
+
+    private fun updateDownloadStatus() {
+        if (isVoiceModelReady && isTranslateModelReady) {
+            progressDownload.progress = 100
+            tvStatus.text = "狀態：就緒"
+            btnStart.isEnabled = true
+            btnStart.text = "開始翻譯"
+        } else {
+            btnStart.isEnabled = false
+            btnStart.text = "模型下載中，請稍候..."
+            val parts = mutableListOf<String>()
+            if (!isVoiceModelReady) parts.add("語音模型")
+            if (!isTranslateModelReady) parts.add("翻譯模型")
+            tvStatus.text = "狀態：正在下載 ${parts.joinToString("、")}..."
         }
     }
 
     private fun startTranslationFlow() {
-        // 先检查麦克风权限
         audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
     }
 
@@ -144,11 +187,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startTranslation() {
-        // 启动悬浮窗服务
         val floatingIntent = Intent(this, FloatingWindowService::class.java)
         startService(floatingIntent)
 
-        // 启动音频捕获服务
         val audioIntent = Intent(this, AudioCaptureService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(audioIntent)
@@ -159,7 +200,6 @@ class MainActivity : AppCompatActivity() {
         tvStatus.text = "狀態：翻譯執行中\n打開直播APP即可看到字幕"
         Toast.makeText(this, "翻譯已啟動，返回桌面看懸浮字幕", Toast.LENGTH_SHORT).show()
 
-        // 自动返回桌面
         moveTaskToBack(true)
     }
 
