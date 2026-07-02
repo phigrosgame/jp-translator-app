@@ -27,9 +27,10 @@ class MainActivity : AppCompatActivity() {
     private var resultData: Intent? = null
 
     companion object {
-        // 全局共享录屏授权，供 AudioCaptureService 使用
-        var sharedResultCode: Int = -1
-        var sharedResultData: Intent? = null
+    // 用 Int.MIN_VALUE 當「尚未授權」的哨兵值，避免跟 RESULT_OK(-1) 撞值
+    	const val NO_RESULT = Int.MIN_VALUE
+    	var sharedResultCode: Int = NO_RESULT
+    	var sharedResultData: Intent? = null
     }
 
     // 请求悬浮窗权限

@@ -67,25 +67,25 @@ class AudioCaptureService : Service() {
     }
 
     private fun startCapture() {
-        val resultCode = MainActivity.sharedResultCode
-        val resultData = MainActivity.sharedResultData
+    val resultCode = MainActivity.sharedResultCode
+    val resultData = MainActivity.sharedResultData
 
-        if (resultCode == -1 || resultData == null) {
-            Log.e(TAG, "沒有錄屏授權，無法捕獲音訊")
-            stopSelf()
-            return
-        }
-
-        val mediaProjectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        mediaProjection = mediaProjectionManager.getMediaProjection(resultCode, resultData)
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            setupAudioPlaybackCapture()
-        } else {
-            Log.e(TAG, "Android 版本太低，需要 Android 10 以上")
-            stopSelf()
-        }
+    if (resultCode != android.app.Activity.RESULT_OK || resultData == null) {
+        Log.e(TAG, "沒有錄屏授權，無法捕獲音訊")
+        stopSelf()
+        return
     }
+
+    val mediaProjectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+    mediaProjection = mediaProjectionManager.getMediaProjection(resultCode, resultData)
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        setupAudioPlaybackCapture()
+    } else {
+        Log.e(TAG, "Android 版本太低，需要 Android 10 以上")
+        stopSelf()
+    }
+}
 
     @RequiresApi(Build.VERSION_CODES.Q)
     private fun setupAudioPlaybackCapture() {
