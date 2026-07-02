@@ -11,14 +11,29 @@ android {
         applicationId "com.jptranslator.app"
         minSdk 29
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "1.1"
+    }
+
+    signingConfigs {
+        // 固定簽章金鑰：讓每次 CI build 出來的 APK 簽章一致，
+        // 新版才能直接蓋舊版更新（不用先移除），下載好的語音模型也不會被清掉。
+        debug {
+            storeFile file("../keystore/release.p12")
+            storePassword "jptranslator"
+            keyAlias "jptranslator"
+            keyPassword "jptranslator"
+            storeType "PKCS12"
+        }
     }
 
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            signingConfig signingConfigs.debug
         }
     }
 
