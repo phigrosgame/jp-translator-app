@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:gravity="center_horizontal">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="日語直播翻譯字幕"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:textColor="#ffffff"
+        android:gravity="center"
+        android:layout_marginBottom="8dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="即時擷取系統音訊，日語翻中文"
+        android:textSize="14sp"
+        android:textColor="#888888"
+        android:gravity="center"
+        android:layout_marginBottom="32dp" />
+
+    <TextView
+        android:id="@+id/tvStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="狀態：就緒"
+        android:textSize="16sp"
+        android:textColor="#FFD700"
+        android:gravity="center"
+        android:layout_marginBottom="24dp"
+        android:padding="12dp"
+        android:background="#22ffffff" />
+
+    <Button
+        android:id="@+id/btnFloatPerm"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="開啟懸浮窗權限"
+        android:textSize="16sp"
+        android:layout_marginBottom="12dp" />
+
+    <Button
+        android:id="@+id/btnStart"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="開始翻譯"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="12dp" />
+
+    <Button
+        android:id="@+id/btnStop"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="停止翻譯"
+        android:textSize="16sp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="\n使用說明：\n1. 先開啟懸浮窗權限\n2. 點擊開始翻譯，授予錄製權限\n3. 打開直播APP即可看到懸浮字幕\n4. 字幕可以拖動調整位置"
+        android:textSize="13sp"
+        android:textColor="#666666"
+        android:layout_marginTop="32dp" />
+
+</LinearLayout>
