@@ -163,9 +163,14 @@ class MainActivity : AppCompatActivity() {
     /** 載入指定語音模型：已存在則直接載入，否則下載（顯示進度）。 */
     private fun prepareVoiceModel(choice: String) {
         isVoiceModelReady = false
-        updateDownloadStatus()
-        if (!VoiceRecogHelper.isModelPresent(this, choice)) {
+        val present = VoiceRecogHelper.isModelPresent(this, choice)
+        btnStart.isEnabled = false
+        btnStart.text = "模型準備中，請稍候..."
+        if (present) {
+            tvStatus.text = "狀態：正在載入語音模型..."
+        } else {
             progressDownload.progress = 0
+            tvStatus.text = "狀態：正在下載語音模型..."
         }
 
         VoiceRecogHelper.downloadModel(

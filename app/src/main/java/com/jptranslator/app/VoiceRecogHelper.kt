@@ -45,8 +45,9 @@ object VoiceRecogHelper {
     @Volatile
     private var isModelReady = false
 
+    // 每次 downloadModel 呼叫都拿一個新世代號；切換模型時舊世代會被判定為已取消而中止。
     @Volatile
-    private var isDownloading = false
+    private var currentGen = 0
 
     /**
      * 模型都存在「App 外部專屬資料夾」：
@@ -110,34 +111,43 @@ object VoiceRecogHelper {
         onProgress: ((Int) -> Unit)? = null,
         onDone: ((success: Boolean) -> Unit)? = null
     ) {
-        if (isDownloading) return
-        // 已經載入同一個模型，直接完成
+        // 已經載入同一個模型，直接完成（不再誤觸發下載進度）
         if (isModelReady && loadedModel == choice) {
             onDone?.invoke(true)
             return
         }
-        isDownloading = true
+
+        // 拿新世代號：舊的下載執行緒會發現世代變了而自動中止
+        val gen = ++currentGen
+        val isCancelled = { gen != currentGen }
 
         Thread {
             var success = false
             try {
                 val spec = SPECS[choice] ?: SPECS.getValue(MODEL_SMALL)
                 val dir = modelDir(context, choice)
-                if (!isPresent(dir)) {
-                    Log.d(TAG, "開始下載語音模型：$choice")
-                    installModel(context, spec, choice, onProgress)
-                    Log.d(TAG, "語音模型下載完成：$choice")
-                } else {
+                if (isPresent(dir)) {
+                    // 已在本機：直接載入，不下載、不報進度
                     Log.d(TAG, "模型已存在，直接載入：$choice")
-                    onProgress?.invoke(100)
+                    loadModel(dir, choice)
+                } else {
+                    Log.d(TAG, "開始下載語音模型：$choice")
+                    installModel(context, spec, choice, isCancelled, onProgress)
+                    if (!isCancelled()) {
+                        Log.d(TAG, "語音模型下載完成：$choice")
+                        loadModel(dir, choice)
+                    }
                 }
-                loadModel(dir, choice)
-                success = isModelReady && loadedModel == choice
+                success = !isCancelled() && isModelReady && loadedModel == choice
             } catch (e: Exception) {
-                Log.e(TAG, "語音模型下載/載入失敗($choice): ${e.message}", e)
+                if (isCancelled()) {
+                    Log.d(TAG, "下載已被切換取消：$choice")
+                } else {
+                    Log.e(TAG, "語音模型下載/載入失敗($choice): ${e.message}", e)
+                }
             } finally {
-                isDownloading = false
-                onDone?.invoke(success)
+                // 只有仍是最新請求時才回報結果，避免被取消的舊請求覆寫 UI 狀態
+                if (!isCancelled()) onDone?.invoke(success)
             }
         }.start()
     }
@@ -172,18 +182,15 @@ object VoiceRecogHelper {
         context: Context,
         spec: ModelSpec,
         choice: String,
+        isCancelled: () -> Boolean,
         onProgress: ((Int) -> Unit)?
     ) {
         val root = modelsRoot(context)
         val partFile = File(root, "vosk-model-$choice.zip.part")
         val zipFile = File(root, "vosk-model-$choice.zip")
 
-        try {
-            downloadResumable(spec.url, partFile, onProgress)
-        } catch (e: Exception) {
-            // 續傳資料保留在 .part，下次再開 App 會接著下，不從 0 開始
-            throw e
-        }
+        downloadResumable(spec.url, partFile, isCancelled, onProgress)
+        if (isCancelled()) return // 被切換取消：保留 .part，下次可續傳
 
         // 下載完成 → 換名 → 解壓（解壓失敗代表檔案壞了，砍掉讓下次重下）
         if (zipFile.exists()) zipFile.delete()
@@ -219,12 +226,18 @@ object VoiceRecogHelper {
      * 斷點續傳下載：斷線 / 讀取中斷就從已下載的位元組數用 HTTP Range 接著下，
      * 並自動重試多次，直到檔案大小達到伺服器回報的總長度。
      */
-    private fun downloadResumable(urlStr: String, dest: File, onProgress: ((Int) -> Unit)?) {
+    private fun downloadResumable(
+        urlStr: String,
+        dest: File,
+        isCancelled: () -> Boolean,
+        onProgress: ((Int) -> Unit)?
+    ) {
         val maxAttempts = 100
         var total = -1L
         var attempt = 0
 
         while (true) {
+            if (isCancelled()) return
             attempt++
             var existing = if (dest.exists()) dest.length() else 0L
             val conn = URL(urlStr).openConnection() as HttpURLConnection
@@ -258,6 +271,7 @@ object VoiceRecogHelper {
                         val buffer = ByteArray(8192)
                         var bytesRead: Int
                         while (input.read(buffer).also { bytesRead = it } != -1) {
+                            if (isCancelled()) return // 切換模型：立即中止，.part 保留供續傳
                             output.write(buffer, 0, bytesRead)
                             downloaded += bytesRead
                             if (total > 0) onProgress?.invoke((downloaded * 100L / total).toInt())
