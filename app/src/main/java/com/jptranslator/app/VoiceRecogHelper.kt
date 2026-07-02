@@ -25,9 +25,6 @@ object VoiceRecogHelper {
     @Volatile
     private var isDownloading = false
 
-    /**
-     * 嘗試載入已經存在於本機的模型（不下載）
-     */
     fun init(context: Context) {
         if (model != null) return
         val modelDir = File(context.filesDir, MODEL_DIR_NAME)
@@ -36,9 +33,6 @@ object VoiceRecogHelper {
         }
     }
 
-    /**
-     * 下載（如果需要）並載入語音模型，背景執行緒執行
-     */
     fun downloadModel(context: Context, onDone: (() -> Unit)? = null) {
         if (isModelReady || isDownloading) return
         isDownloading = true
@@ -108,31 +102,48 @@ object VoiceRecogHelper {
     }
 
     /**
-     * 辨識一段 PCM 16bit 單聲道音訊，回傳辨識出的日文文字
+     * 持續餵一小塊音訊進辨識器（串流模式）。
+     * 回傳 true 代表 Vosk 偵測到自然停頓，一句話已經講完，
+     * 這時候呼叫 getFinalText() 拿最終結果。
+     * 回傳 false 代表還在講話中，可以呼叫 getPartialText() 拿暫時字幕。
      */
     @Synchronized
-    fun recognize(audioData: ByteArray, sampleRate: Int, callback: (String) -> Unit) {
+    fun acceptAudioChunk(chunk: ByteArray, len: Int): Boolean {
         val rec = recognizer
-        if (rec == null || !isModelReady) {
-            Log.w(TAG, "語音識別器未就緒，跳過")
-            callback("")
-            return
-        }
-
-        try {
-            rec.acceptWaveForm(audioData, audioData.size)
-            val text = extractText(rec.finalResult)
-            callback(text)
+        if (rec == null || !isModelReady) return false
+        return try {
+            rec.acceptWaveForm(chunk, len)
         } catch (e: Exception) {
-            Log.e(TAG, "語音識別失敗: ${e.message}", e)
-            callback("")
+            Log.e(TAG, "串流辨識失敗: ${e.message}", e)
+            false
         }
     }
 
-    private fun extractText(json: String): String {
+    @Synchronized
+    fun getFinalText(): String {
+        val rec = recognizer ?: return ""
         return try {
-            val regex = "\"text\"\\s*:\\s*\"(.*?)\"".toRegex()
-            regex.find(json)?.groupValues?.get(1)?.replace("\\u0020", " ") ?: ""
+            extractField(rec.result, "text")
+        } catch (e: Exception) {
+            Log.e(TAG, "取得最終結果失敗: ${e.message}")
+            ""
+        }
+    }
+
+    @Synchronized
+    fun getPartialText(): String {
+        val rec = recognizer ?: return ""
+        return try {
+            extractField(rec.partialResult, "partial")
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    private fun extractField(json: String, field: String): String {
+        return try {
+            val regex = "\"$field\"\\s*:\\s*\"(.*?)\"".toRegex()
+            regex.find(json)?.groupValues?.get(1) ?: ""
         } catch (e: Exception) {
             ""
         }

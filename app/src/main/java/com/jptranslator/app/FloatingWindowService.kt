@@ -32,22 +32,28 @@ class FloatingWindowService : Service() {
     private var initialTouchY = 0f
     private var isDragging = false
 
-    companion object {
-        // 更新翻译结果的回调
-        var updateCallback: ((String, String) -> Unit)? = null
+companion object {
+    var updateCallback: ((String, String) -> Unit)? = null
+    var partialCallback: ((String) -> Unit)? = null   // ← 新增這行
+}
+
+override fun onCreate() {
+    super.onCreate()
+    windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+    showFloatingWindow()
+
+    // 注册回调
+    updateCallback = { japanese, chinese ->
+        updateTranslation(japanese, chinese)
     }
 
-    override fun onCreate() {
-        super.onCreate()
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        showFloatingWindow()
-
-        // 注册回调
-        updateCallback = { japanese, chinese ->
-            updateTranslation(japanese, chinese)
+    partialCallback = { partial ->
+        floatingView?.post {
+            tvJapanese.text = partial
+            tvChinese.text = "（翻譯中…）"
         }
     }
-
+}
     private fun showFloatingWindow() {
         val inflater = getSystemService(LAYOUT_INFLATER_SERVICE) as LayoutInflater
         floatingView = inflater.inflate(R.layout.floating_window, null)

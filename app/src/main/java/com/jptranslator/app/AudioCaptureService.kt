@@ -4,7 +4,6 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
-import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioFormat
@@ -20,6 +19,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -38,16 +38,14 @@ class AudioCaptureService : Service() {
     private val channelConfig = AudioFormat.CHANNEL_IN_MONO
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
 
-    // 节流：每 2.5 秒处理一次音频
-    private val processIntervalMs = 2500L
-    private var lastProcessTime = 0L
+    // 每次讀取約 0.1 秒的音訊，做串流辨識（不再固定 2.5 秒才處理一次）
+    private val chunkSize = 3200 // 16000Hz * 2bytes * 0.1s
 
-    // 音频缓冲
-    private val audioBuffer = mutableListOf<Byte>()
-    private val maxBufferSize = sampleRate * 2 * 3 // 最多存3秒
-
-    // 静音检测阈值
+    // 靜音判斷閾值：只用來決定要不要更新暫時字幕，不影響最終斷句（斷句交給 Vosk 自己判斷）
     private val silenceThreshold = 500
+
+    // 每隔幾個 chunk 更新一次暫時字幕（約每 0.3 秒）
+    private val partialUpdateEveryNChunks = 3
 
     companion object {
         const val NOTIFICATION_ID = 1
@@ -59,37 +57,34 @@ class AudioCaptureService : Service() {
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, createNotification())
 
-        // 初始化语音识别
         VoiceRecogHelper.init(this)
-
-        // 开始捕获
         startCapture()
     }
 
     private fun startCapture() {
-    val resultCode = MainActivity.sharedResultCode
-    val resultData = MainActivity.sharedResultData
+        val resultCode = MainActivity.sharedResultCode
+        val resultData = MainActivity.sharedResultData
 
-    if (resultCode != android.app.Activity.RESULT_OK || resultData == null) {
-        Log.e(TAG, "沒有錄屏授權，無法捕獲音訊")
-        stopSelf()
-        return
+        if (resultCode != android.app.Activity.RESULT_OK || resultData == null) {
+            Log.e(TAG, "沒有錄屏授權，無法捕獲音訊")
+            stopSelf()
+            return
+        }
+
+        val mediaProjectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        mediaProjection = mediaProjectionManager.getMediaProjection(resultCode, resultData)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            setupAudioPlaybackCapture()
+        } else {
+            Log.e(TAG, "Android 版本太低，需要 Android 10 以上")
+            stopSelf()
+        }
     }
-
-    val mediaProjectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-    mediaProjection = mediaProjectionManager.getMediaProjection(resultCode, resultData)
-
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        setupAudioPlaybackCapture()
-    } else {
-        Log.e(TAG, "Android 版本太低，需要 Android 10 以上")
-        stopSelf()
-    }
-}
 
     @RequiresApi(Build.VERSION_CODES.Q)
     private fun setupAudioPlaybackCapture() {
-        val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
+        val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
 
         val config = AudioPlaybackCaptureConfiguration.Builder(mediaProjection!!)
             .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
@@ -105,7 +100,7 @@ class AudioCaptureService : Service() {
                     .setChannelMask(channelConfig)
                     .build()
             )
-            .setBufferSizeInBytes(bufferSize * 2)
+            .setBufferSizeInBytes(minBufferSize * 2)
             .setAudioPlaybackCaptureConfig(config)
             .build()
 
@@ -115,39 +110,38 @@ class AudioCaptureService : Service() {
 
     private fun startProcessingLoop() {
         captureJob = CoroutineScope(Dispatchers.IO).launch {
-            val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
-            val buffer = ByteArray(bufferSize)
+            val buffer = ByteArray(chunkSize)
+            var partialCounter = 0
 
-            while (true) {
-                val bytesRead = audioRecord?.read(buffer, 0, bufferSize) ?: 0
+            while (isActive) {
+                val bytesRead = audioRecord?.read(buffer, 0, chunkSize) ?: 0
 
-                if (bytesRead > 0) {
-                    // 添加到缓冲
-                    audioBuffer.addAll(buffer.take(bytesRead).toList())
-
-                    // 限制缓冲大小
-                    if (audioBuffer.size > maxBufferSize) {
-                        audioBuffer.subList(0, audioBuffer.size - maxBufferSize).clear()
-                    }
-
-                    // 节流：每隔一段时间处理一次
-                    val currentTime = System.currentTimeMillis()
-                    if (currentTime - lastProcessTime >= processIntervalMs) {
-                        lastProcessTime = currentTime
-
-                        // 检测是否静音
-                        val audioData = audioBuffer.toByteArray()
-                        if (!isSilence(audioData)) {
-                            processAudioChunk(audioData)
-                        }
-
-                        // 清空缓冲
-                        audioBuffer.clear()
-                    }
+                if (bytesRead <= 0) {
+                    delay(10)
+                    continue
                 }
 
-                // 稍微延迟，避免CPU占用过高
-                delay(10)
+                val chunkData = if (bytesRead == chunkSize) buffer else buffer.copyOf(bytesRead)
+                val isSpeechEnd = VoiceRecogHelper.acceptAudioChunk(chunkData, bytesRead)
+
+                if (isSpeechEnd) {
+                    // Vosk 偵測到自然停頓，一句話講完了
+                    val japaneseText = VoiceRecogHelper.getFinalText()
+                    partialCounter = 0
+                    if (japaneseText.isNotBlank() && japaneseText.length >= 2) {
+                        processFinalSegment(japaneseText)
+                    }
+                } else if (!isSilence(chunkData)) {
+                    // 还在讲话中，定期更新暂时字幕，给即时反馈
+                    partialCounter++
+                    if (partialCounter >= partialUpdateEveryNChunks) {
+                        partialCounter = 0
+                        val partialText = VoiceRecogHelper.getPartialText()
+                        if (partialText.isNotBlank()) {
+                            FloatingWindowService.partialCallback?.invoke(partialText)
+                        }
+                    }
+                }
             }
         }
     }
@@ -169,15 +163,9 @@ class AudioCaptureService : Service() {
         return rms < silenceThreshold
     }
 
-    private fun processAudioChunk(audioData: ByteArray) {
-        VoiceRecogHelper.recognize(audioData, sampleRate) { japaneseText ->
-            if (japaneseText.isNotBlank()) {
-                // 翻译
-                TranslateHelper.translate(japaneseText) { chineseText ->
-                    // 更新悬浮窗
-                    FloatingWindowService.updateCallback?.invoke(japaneseText, chineseText)
-                }
-            }
+    private fun processFinalSegment(japaneseText: String) {
+        TranslateHelper.translate(japaneseText) { chineseText ->
+            FloatingWindowService.updateCallback?.invoke(japaneseText, chineseText)
         }
     }
 
@@ -201,28 +189,4 @@ class AudioCaptureService : Service() {
             Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("日語翻譯字幕")
                 .setContentText("正在擷取系統音訊並翻譯...")
-                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-                .build()
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-                .setContentTitle("日語翻譯字幕")
-                .setContentText("正在擷取系統音訊並翻譯...")
-                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-                .build()
-        }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        captureJob?.cancel()
-        audioRecord?.stop()
-        audioRecord?.release()
-        audioRecord = null
-        mediaProjection?.stop()
-        mediaProjection = null
-	VoiceRecogHelper.release() 
-    }
-
-    override fun onBind(intent: Intent?): IBinder? = null
-}
+                .setSmallIcon(android.R.drawab
