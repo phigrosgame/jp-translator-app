@@ -9,9 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.widget.Button
-import android.widget.ProgressBar
-import android.widget.RadioButton
-import android.widget.RadioGroup
+import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -19,8 +17,8 @@ import androidx.appcompat.app.AppCompatActivity
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var etApiKey: android.widget.EditText
-    private lateinit var etModelName: android.widget.EditText
+    private lateinit var etApiKey: EditText
+    private lateinit var etModelName: EditText
     private lateinit var btnFloatPerm: Button
     private lateinit var btnStart: Button
     private lateinit var btnStop: Button
@@ -28,8 +26,8 @@ class MainActivity : AppCompatActivity() {
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    @Volatile private var isVoiceModelReady = false
-    @Volatile private var isTranslateModelReady = false
+    private var resultCode = -1
+    private var resultData: Intent? = null
 
     companion object {
         const val NO_RESULT = Int.MIN_VALUE
@@ -89,8 +87,6 @@ class MainActivity : AppCompatActivity() {
         etApiKey.setText(GeminiService.getApiKey(this))
         etModelName.setText(GeminiService.getModelName(this))
 
-        btnStart.isEnabled = true
-
         btnFloatPerm.setOnClickListener {
             requestOverlayPermission()
         }
@@ -104,8 +100,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // (移除所有舊 Vosk 方法)
-}
     private fun startTranslationFlow() {
         audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
     }
@@ -145,7 +139,6 @@ class MainActivity : AppCompatActivity() {
 
         val floatingIntent = Intent(this, FloatingWindowService::class.java)
         startService(floatingIntent)
-
 
         val audioIntent = Intent(this, AudioCaptureService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
