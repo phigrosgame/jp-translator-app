@@ -19,23 +19,17 @@ import androidx.appcompat.app.AppCompatActivity
 
 class MainActivity : AppCompatActivity() {
 
+    private lateinit var etApiKey: android.widget.EditText
+    private lateinit var etModelName: android.widget.EditText
     private lateinit var btnFloatPerm: Button
     private lateinit var btnStart: Button
     private lateinit var btnStop: Button
     private lateinit var tvStatus: TextView
-    private lateinit var progressDownload: ProgressBar
-    private lateinit var modelGroup: RadioGroup
-    private lateinit var rbSmall: RadioButton
-    private lateinit var rbLarge: RadioButton
-    private lateinit var tvModelHint: TextView
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
     @Volatile private var isVoiceModelReady = false
     @Volatile private var isTranslateModelReady = false
-
-    private var resultCode = -1
-    private var resultData: Intent? = null
 
     companion object {
         const val NO_RESULT = Int.MIN_VALUE
@@ -85,20 +79,17 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        etApiKey = findViewById(R.id.etApiKey)
+        etModelName = findViewById(R.id.etModelName)
         btnFloatPerm = findViewById(R.id.btnFloatPerm)
         btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
         tvStatus = findViewById(R.id.tvStatus)
-        progressDownload = findViewById(R.id.progressDownload)
-        modelGroup = findViewById(R.id.modelGroup)
-        rbSmall = findViewById(R.id.rbSmall)
-        rbLarge = findViewById(R.id.rbLarge)
-        tvModelHint = findViewById(R.id.tvModelHint)
 
-        btnStart.isEnabled = false
+        etApiKey.setText(GeminiService.getApiKey(this))
+        etModelName.setText(GeminiService.getModelName(this))
 
-        setupModelSelector()
-        initModels()
+        btnStart.isEnabled = true
 
         btnFloatPerm.setOnClickListener {
             requestOverlayPermission()
@@ -113,108 +104,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun setupModelSelector() {
-        // 依儲存的偏好設定選中狀態
-        val preferred = VoiceRecogHelper.getPreferredModel(this)
-        if (preferred == VoiceRecogHelper.MODEL_LARGE) rbLarge.isChecked = true else rbSmall.isChecked = true
-        updateModelHint()
-
-        modelGroup.setOnCheckedChangeListener { _, checkedId ->
-            val choice = if (checkedId == R.id.rbLarge) VoiceRecogHelper.MODEL_LARGE
-                         else VoiceRecogHelper.MODEL_SMALL
-            VoiceRecogHelper.setPreferredModel(this, choice)
-            updateModelHint()
-            // 切換模型：載入（已存在直接載入，不存在則下載）
-            prepareVoiceModel(choice)
-        }
-    }
-
-    private fun updateModelHint() {
-        val choice = VoiceRecogHelper.getPreferredModel(this)
-        tvModelHint.text = when {
-            VoiceRecogHelper.isModelPresent(this, choice) -> "此模型已在本機，可直接使用"
-            choice == VoiceRecogHelper.MODEL_LARGE -> "高精度模型約 1GB，切換後將開始下載（建議 Wi-Fi）"
-            else -> "尚未下載，切換後將開始下載"
-        }
-    }
-
-    private fun initModels() {
-        updateDownloadStatus()
-
-        // 翻译模型（MLKit，无逐字节进度，只有完成/失败回呼）
-        TranslateHelper.init(this@MainActivity) { success ->
-            mainHandler.post {
-                isTranslateModelReady = true
-                if (!success) {
-                    Toast.makeText(
-                        this@MainActivity,
-                        "翻譯模型下載失敗，請確認已連接 Wi-Fi 後重新打開 App",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-                updateDownloadStatus()
-            }
-        }
-
-        // 语音辨识模型（Vosk）：載入使用者偏好的模型
-        prepareVoiceModel(VoiceRecogHelper.getPreferredModel(this))
-    }
-
-    /** 載入指定語音模型：已存在則直接載入，否則下載（顯示進度）。 */
-    private fun prepareVoiceModel(choice: String) {
-        isVoiceModelReady = false
-        val present = VoiceRecogHelper.isModelPresent(this, choice)
-        btnStart.isEnabled = false
-        btnStart.text = "模型準備中，請稍候..."
-        if (present) {
-            tvStatus.text = "狀態：正在載入語音模型..."
-        } else {
-            progressDownload.progress = 0
-            tvStatus.text = "狀態：正在下載語音模型..."
-        }
-
-        VoiceRecogHelper.downloadModel(
-            context = this@MainActivity,
-            choice = choice,
-            onProgress = { percent ->
-                mainHandler.post {
-                    progressDownload.progress = percent
-                    tvStatus.text = "狀態：正在下載語音模型... $percent%"
-                }
-            },
-            onDone = { success ->
-                mainHandler.post {
-                    isVoiceModelReady = success
-                    if (!success) {
-                        Toast.makeText(
-                            this@MainActivity,
-                            "語音模型下載/載入失敗，請確認網路後再試",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
-                    updateModelHint()
-                    updateDownloadStatus()
-                }
-            }
-        )
-    }
-
-    private fun updateDownloadStatus() {
-        if (isVoiceModelReady && isTranslateModelReady) {
-            progressDownload.progress = 100
-            tvStatus.text = "狀態：就緒"
-            btnStart.isEnabled = true
-            btnStart.text = "開始翻譯"
-        } else {
-            btnStart.isEnabled = false
-            btnStart.text = "模型下載中，請稍候..."
-            val parts = mutableListOf<String>()
-            if (!isVoiceModelReady) parts.add("語音模型")
-            if (!isTranslateModelReady) parts.add("翻譯模型")
-            tvStatus.text = "狀態：正在下載 ${parts.joinToString("、")}..."
-        }
-    }
-
+    // (移除所有舊 Vosk 方法)
+}
     private fun startTranslationFlow() {
         audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
     }
@@ -248,8 +139,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startTranslation() {
+        // 儲存設定
+        GeminiService.setApiKey(this, etApiKey.text.toString())
+        GeminiService.setModelName(this, etModelName.text.toString().ifEmpty { "gemini-2.0-flash" })
+
         val floatingIntent = Intent(this, FloatingWindowService::class.java)
         startService(floatingIntent)
+
 
         val audioIntent = Intent(this, AudioCaptureService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
