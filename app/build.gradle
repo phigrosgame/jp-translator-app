@@ -55,6 +55,9 @@ dependencies {
     implementation 'com.alphacephei:vosk-android:0.3.47'
     implementation 'net.java.dev.jna:jna:5.13.0@aar'
 
-    // Google MLKit 离线翻译（日→中）
+    // Google MLKit 离线翻译（日→中，输出为简体）
     implementation 'com.google.mlkit:translate:17.0.2'
+
+    // 简体 → 繁体转换（纯 Java、离线）
+    implementation 'com.github.houbb:opencc4j:1.8.1'
 }

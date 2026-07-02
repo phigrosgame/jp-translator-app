@@ -47,6 +47,10 @@ class AudioCaptureService : Service() {
     // 每隔幾個 chunk 更新一次暫時字幕（約每 0.3 秒）
     private val partialUpdateEveryNChunks = 3
 
+    // 最長強制斷句：連續講話超過這個 chunk 數（約 6 秒）還沒自然停頓，就強制斷一句，
+    // 避免長句一直不斷導致字幕遲遲不更新、延遲爆炸。
+    private val maxSpeechChunks = 60 // 60 * 0.1s = 6 秒
+
     companion object {
         const val NOTIFICATION_ID = 1
         const val CHANNEL_ID = "audio_capture_channel"
@@ -112,6 +116,7 @@ class AudioCaptureService : Service() {
         captureJob = CoroutineScope(Dispatchers.IO).launch {
             val buffer = ByteArray(chunkSize)
             var partialCounter = 0
+            var speechChunks = 0 // 目前這一句已連續講了幾個 chunk
 
             while (isActive) {
                 val bytesRead = audioRecord?.read(buffer, 0, chunkSize) ?: 0
@@ -128,17 +133,30 @@ class AudioCaptureService : Service() {
                     // Vosk 偵測到自然停頓，一句話講完了
                     val japaneseText = VoiceRecogHelper.getFinalText()
                     partialCounter = 0
+                    speechChunks = 0
                     if (japaneseText.isNotBlank() && japaneseText.length >= 2) {
                         processFinalSegment(japaneseText)
                     }
                 } else if (!isSilence(chunkData)) {
-                    // 还在讲话中，定期更新暂时字幕，给即时反馈
-                    partialCounter++
-                    if (partialCounter >= partialUpdateEveryNChunks) {
+                    // 还在讲话中
+                    speechChunks++
+                    if (speechChunks >= maxSpeechChunks) {
+                        // 講太久還沒停頓，強制斷一句，避免延遲累積
+                        val japaneseText = VoiceRecogHelper.flushAndReset()
                         partialCounter = 0
-                        val partialText = VoiceRecogHelper.getPartialText()
-                        if (partialText.isNotBlank()) {
-                            FloatingWindowService.partialCallback?.invoke(partialText)
+                        speechChunks = 0
+                        if (japaneseText.isNotBlank() && japaneseText.length >= 2) {
+                            processFinalSegment(japaneseText)
+                        }
+                    } else {
+                        // 定期更新暂时字幕，给即时反馈
+                        partialCounter++
+                        if (partialCounter >= partialUpdateEveryNChunks) {
+                            partialCounter = 0
+                            val partialText = VoiceRecogHelper.getPartialText()
+                            if (partialText.isNotBlank()) {
+                                FloatingWindowService.partialCallback?.invoke(partialText)
+                            }
                         }
                     }
                 }

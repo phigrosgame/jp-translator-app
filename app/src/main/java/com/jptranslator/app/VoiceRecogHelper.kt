@@ -13,11 +13,33 @@ import java.util.zip.ZipInputStream
 object VoiceRecogHelper {
 
     private const val TAG = "VoiceRecogHelper"
-    private const val MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip"
-    private const val MODEL_DIR_NAME = "vosk-model-small-ja-0.22"
+    private const val PREFS = "jptranslator_prefs"
+    private const val KEY_MODEL = "voice_model_choice"
+
+    // 兩種模型：small（預設，快、~50MB）、large（高精度、~1GB）
+    const val MODEL_SMALL = "small"
+    const val MODEL_LARGE = "large"
+
+    private data class ModelSpec(val dirName: String, val url: String)
+
+    private val SPECS = mapOf(
+        MODEL_SMALL to ModelSpec(
+            "vosk-model-small-ja-0.22",
+            "https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip"
+        ),
+        MODEL_LARGE to ModelSpec(
+            "vosk-model-ja-0.22",
+            "https://alphacephei.com/vosk/models/vosk-model-ja-0.22.zip"
+        )
+    )
 
     private var model: Model? = null
     private var recognizer: Recognizer? = null
+
+    // 目前實際載入的是哪個模型（small / large / null）
+    @Volatile
+    var loadedModel: String? = null
+        private set
 
     @Volatile
     private var isModelReady = false
@@ -25,52 +47,125 @@ object VoiceRecogHelper {
     @Volatile
     private var isDownloading = false
 
+    /**
+     * 模型都存在「App 外部專屬資料夾」：
+     *   Android/data/com.jptranslator.app/files/models/<模型資料夾>
+     * 好處：
+     *   - adb install -r / Android Studio 直接更新 App 時，模型會保留，不用重下
+     *   - 可在 PC 解壓大模型後，用 USB 直接丟進這個資料夾，App 開機自動偵測載入
+     * 若取不到外部空間才退回內部 filesDir。
+     */
+    private fun modelsRoot(context: Context): File {
+        val base = context.getExternalFilesDir(null) ?: context.filesDir
+        val dir = File(base, "models")
+        if (!dir.exists()) dir.mkdirs()
+        return dir
+    }
+
+    private fun modelDir(context: Context, choice: String): File {
+        val spec = SPECS[choice] ?: SPECS.getValue(MODEL_SMALL)
+        return File(modelsRoot(context), spec.dirName)
+    }
+
+    private fun isPresent(dir: File): Boolean = dir.exists() && !dir.list().isNullOrEmpty()
+
+    /** 讀取使用者偏好的模型（預設 small） */
+    fun getPreferredModel(context: Context): String {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_MODEL, MODEL_SMALL) ?: MODEL_SMALL
+    }
+
+    fun setPreferredModel(context: Context, choice: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(KEY_MODEL, choice).apply()
+    }
+
+    /** 指定的模型是否已在本機（可直接載入、免下載） */
+    fun isModelPresent(context: Context, choice: String): Boolean =
+        isPresent(modelDir(context, choice))
+
+    /**
+     * 啟動時呼叫：載入使用者偏好的模型（若已存在）。
+     * 若偏好的是 large 但沒下載、而 small 在，會退回載入 small 讓使用者至少能用。
+     */
     fun init(context: Context) {
         if (model != null) return
-        val modelDir = File(context.filesDir, MODEL_DIR_NAME)
-        if (modelDir.exists() && !modelDir.list().isNullOrEmpty()) {
-            loadModel(modelDir)
+        val preferred = getPreferredModel(context)
+        val preferredDir = modelDir(context, preferred)
+        when {
+            isPresent(preferredDir) -> loadModel(preferredDir, preferred)
+            isModelPresent(context, MODEL_SMALL) -> loadModel(modelDir(context, MODEL_SMALL), MODEL_SMALL)
+            else -> Log.d(TAG, "尚無任何本機模型，等待下載")
         }
     }
 
-    fun downloadModel(context: Context, onProgress: ((Int) -> Unit)? = null, onDone: (() -> Unit)? = null) {
-        if (isModelReady || isDownloading) return
+    /**
+     * 下載並載入指定模型。若該模型資料夾已存在（例如手動匯入），就直接載入不下載。
+     * 切換模型時會先釋放舊的再載入新的。
+     */
+    fun downloadModel(
+        context: Context,
+        choice: String = getPreferredModel(context),
+        onProgress: ((Int) -> Unit)? = null,
+        onDone: ((success: Boolean) -> Unit)? = null
+    ) {
+        if (isDownloading) return
+        // 已經載入同一個模型，直接完成
+        if (isModelReady && loadedModel == choice) {
+            onDone?.invoke(true)
+            return
+        }
         isDownloading = true
 
         Thread {
+            var success = false
             try {
-                val modelDir = File(context.filesDir, MODEL_DIR_NAME)
-                if (!modelDir.exists() || modelDir.list().isNullOrEmpty()) {
-                    Log.d(TAG, "開始下載日語語音模型...")
-                    val zipFile = File(context.filesDir, "vosk-model.zip")
-                    downloadFile(MODEL_URL, zipFile, onProgress)
-                    unzip(zipFile, context.filesDir)
+                val spec = SPECS[choice] ?: SPECS.getValue(MODEL_SMALL)
+                val dir = modelDir(context, choice)
+                if (!isPresent(dir)) {
+                    Log.d(TAG, "開始下載語音模型：$choice")
+                    val zipFile = File(modelsRoot(context), "vosk-model-$choice.zip")
+                    downloadFile(spec.url, zipFile, onProgress)
+                    unzip(zipFile, modelsRoot(context))
                     zipFile.delete()
-                    Log.d(TAG, "日語語音模型下載完成")
+                    Log.d(TAG, "語音模型下載完成：$choice")
+                } else {
+                    Log.d(TAG, "模型已存在，直接載入：$choice")
+                    onProgress?.invoke(100)
                 }
-                loadModel(modelDir)
+                loadModel(dir, choice)
+                success = isModelReady && loadedModel == choice
             } catch (e: Exception) {
-                Log.e(TAG, "語音模型下載/載入失敗: ${e.message}", e)
+                Log.e(TAG, "語音模型下載/載入失敗($choice): ${e.message}", e)
             } finally {
                 isDownloading = false
-                onDone?.invoke()
+                onDone?.invoke(success)
             }
         }.start()
     }
 
-    private fun loadModel(modelDir: File) {
+    @Synchronized
+    private fun loadModel(dir: File, choice: String) {
         try {
-            val loadedModel = Model(modelDir.absolutePath)
-            model = loadedModel
-            recognizer = Recognizer(loadedModel, 16000.0f)
+            // 切換模型：釋放舊的
+            recognizer?.close()
+            model?.close()
+            recognizer = null
+            model = null
+            isModelReady = false
+
+            val loadedM = Model(dir.absolutePath)
+            model = loadedM
+            recognizer = Recognizer(loadedM, 16000.0f)
+            loadedModel = choice
             isModelReady = true
-            Log.d(TAG, "Vosk 模型載入完成")
+            Log.d(TAG, "Vosk 模型載入完成：$choice")
         } catch (e: Exception) {
-            Log.e(TAG, "模型載入失敗: ${e.message}", e)
+            Log.e(TAG, "模型載入失敗($choice): ${e.message}", e)
         }
     }
 
-   private fun downloadFile(urlStr: String, dest: File, onProgress: ((Int) -> Unit)?) {
+    private fun downloadFile(urlStr: String, dest: File, onProgress: ((Int) -> Unit)?) {
         val conn = URL(urlStr).openConnection() as HttpURLConnection
         conn.connectTimeout = 30000
         conn.readTimeout = 30000
@@ -94,6 +189,7 @@ object VoiceRecogHelper {
             }
         }
     }
+
     private fun unzip(zipFile: File, targetDir: File) {
         ZipInputStream(zipFile.inputStream()).use { zis ->
             var entry = zis.nextEntry
@@ -135,7 +231,7 @@ object VoiceRecogHelper {
     fun getFinalText(): String {
         val rec = recognizer ?: return ""
         return try {
-            extractField(rec.result, "text")
+            stripSpaces(extractField(rec.result, "text"))
         } catch (e: Exception) {
             Log.e(TAG, "取得最終結果失敗: ${e.message}")
             ""
@@ -146,11 +242,35 @@ object VoiceRecogHelper {
     fun getPartialText(): String {
         val rec = recognizer ?: return ""
         return try {
-            extractField(rec.partialResult, "partial")
+            stripSpaces(extractField(rec.partialResult, "partial"))
         } catch (e: Exception) {
             ""
         }
     }
+
+    /**
+     * 強制結束目前這一句：拿到目前累積的最終文字並重置辨識器。
+     * 用於「講太久一直沒有自然停頓」時強制斷句。
+     */
+    @Synchronized
+    fun flushAndReset(): String {
+        val rec = recognizer ?: return ""
+        return try {
+            val text = stripSpaces(extractField(rec.result, "text"))
+            rec.reset()
+            text
+        } catch (e: Exception) {
+            Log.e(TAG, "強制斷句失敗: ${e.message}")
+            ""
+        }
+    }
+
+    /**
+     * Vosk 日文輸出是空格分詞（例如「これ は テスト です」），
+     * 這裡去掉半形/全形空格還原成自然日文，翻譯品質才會好。
+     */
+    private fun stripSpaces(text: String): String =
+        text.replace(" ", "").replace("　", "")
 
     private fun extractField(json: String, field: String): String {
         return try {
@@ -167,5 +287,6 @@ object VoiceRecogHelper {
         recognizer = null
         model = null
         isModelReady = false
+        loadedModel = null
     }
 }

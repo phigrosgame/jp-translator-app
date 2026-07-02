@@ -10,6 +10,8 @@ import android.os.Looper
 import android.provider.Settings
 import android.widget.Button
 import android.widget.ProgressBar
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -22,6 +24,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnStop: Button
     private lateinit var tvStatus: TextView
     private lateinit var progressDownload: ProgressBar
+    private lateinit var modelGroup: RadioGroup
+    private lateinit var rbSmall: RadioButton
+    private lateinit var rbLarge: RadioButton
+    private lateinit var tvModelHint: TextView
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -84,9 +90,14 @@ class MainActivity : AppCompatActivity() {
         btnStop = findViewById(R.id.btnStop)
         tvStatus = findViewById(R.id.tvStatus)
         progressDownload = findViewById(R.id.progressDownload)
+        modelGroup = findViewById(R.id.modelGroup)
+        rbSmall = findViewById(R.id.rbSmall)
+        rbLarge = findViewById(R.id.rbLarge)
+        tvModelHint = findViewById(R.id.tvModelHint)
 
         btnStart.isEnabled = false
 
+        setupModelSelector()
         initModels()
 
         btnFloatPerm.setOnClickListener {
@@ -99,6 +110,31 @@ class MainActivity : AppCompatActivity() {
 
         btnStop.setOnClickListener {
             stopTranslation()
+        }
+    }
+
+    private fun setupModelSelector() {
+        // 依儲存的偏好設定選中狀態
+        val preferred = VoiceRecogHelper.getPreferredModel(this)
+        if (preferred == VoiceRecogHelper.MODEL_LARGE) rbLarge.isChecked = true else rbSmall.isChecked = true
+        updateModelHint()
+
+        modelGroup.setOnCheckedChangeListener { _, checkedId ->
+            val choice = if (checkedId == R.id.rbLarge) VoiceRecogHelper.MODEL_LARGE
+                         else VoiceRecogHelper.MODEL_SMALL
+            VoiceRecogHelper.setPreferredModel(this, choice)
+            updateModelHint()
+            // 切換模型：載入（已存在直接載入，不存在則下載）
+            prepareVoiceModel(choice)
+        }
+    }
+
+    private fun updateModelHint() {
+        val choice = VoiceRecogHelper.getPreferredModel(this)
+        tvModelHint.text = when {
+            VoiceRecogHelper.isModelPresent(this, choice) -> "此模型已在本機，可直接使用"
+            choice == VoiceRecogHelper.MODEL_LARGE -> "高精度模型約 1GB，切換後將開始下載（建議 Wi-Fi）"
+            else -> "尚未下載，切換後將開始下載"
         }
     }
 
@@ -120,18 +156,38 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // 语音辨识模型（Vosk，有下载进度）
+        // 语音辨识模型（Vosk）：載入使用者偏好的模型
+        prepareVoiceModel(VoiceRecogHelper.getPreferredModel(this))
+    }
+
+    /** 載入指定語音模型：已存在則直接載入，否則下載（顯示進度）。 */
+    private fun prepareVoiceModel(choice: String) {
+        isVoiceModelReady = false
+        updateDownloadStatus()
+        if (!VoiceRecogHelper.isModelPresent(this, choice)) {
+            progressDownload.progress = 0
+        }
+
         VoiceRecogHelper.downloadModel(
             context = this@MainActivity,
+            choice = choice,
             onProgress = { percent ->
                 mainHandler.post {
                     progressDownload.progress = percent
                     tvStatus.text = "狀態：正在下載語音模型... $percent%"
                 }
             },
-            onDone = {
+            onDone = { success ->
                 mainHandler.post {
-                    isVoiceModelReady = true
+                    isVoiceModelReady = success
+                    if (!success) {
+                        Toast.makeText(
+                            this@MainActivity,
+                            "語音模型下載/載入失敗，請確認網路後再試",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                    updateModelHint()
                     updateDownloadStatus()
                 }
             }

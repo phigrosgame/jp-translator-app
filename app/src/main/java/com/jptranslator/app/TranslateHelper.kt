@@ -7,6 +7,7 @@ import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.nl.translate.Translation
 import com.google.mlkit.nl.translate.Translator
 import com.google.mlkit.nl.translate.TranslatorOptions
+import com.github.houbb.opencc4j.util.ZhConverterUtil
 
 object TranslateHelper {
 
@@ -55,11 +56,21 @@ object TranslateHelper {
 
         translator?.translate(text)
             ?.addOnSuccessListener { translatedText ->
-                callback(translatedText)
+                callback(toTraditional(translatedText))
             }
             ?.addOnFailureListener { exception ->
                 Log.e(TAG, "翻譯失敗: ${exception.message}")
                 callback(text)
             }
+    }
+
+    /** MLKit 只輸出簡體，這裡轉成繁體（台灣/香港適用）。轉換失敗就回原字串。 */
+    private fun toTraditional(simplified: String): String {
+        return try {
+            ZhConverterUtil.toTraditional(simplified)
+        } catch (e: Exception) {
+            Log.e(TAG, "簡繁轉換失敗: ${e.message}")
+            simplified
+        }
     }
 }
