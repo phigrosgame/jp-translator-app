@@ -40,7 +40,7 @@ object GeminiService {
             return null
         }
 
-        return try {
+        try {
             val url = URL("https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}")
             val conn = url.openConnection() as HttpURLConnection
             conn.requestMethod = "POST"
@@ -74,19 +74,21 @@ object GeminiService {
             if (conn.responseCode == 200) {
                 val response = conn.inputStream.bufferedReader().use { it.readText() }
                 val root = JSONObject(response)
-                return root.getJSONArray("candidates")
+                val text = root.getJSONArray("candidates")
                     .getJSONObject(0)
                     .getJSONObject("content")
                     .getJSONArray("parts")
                     .getJSONObject(0)
                     .getString("text")
                     .trim()
+                return text
             } else {
                 Log.e(TAG, "Gemini API error: ${conn.responseCode}")
+                return null
             }
         } catch (e: Exception) {
             Log.e(TAG, "Gemini request failed: ${e.message}")
+            return null
         }
-        return null
     }
 }
