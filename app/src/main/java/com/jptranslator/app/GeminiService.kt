@@ -9,30 +9,13 @@ import java.net.URL
 
 object GeminiService {
     private const val TAG = "GeminiService"
-    private const val PREFS = "jptranslator_prefs"
-    private const val KEY_API_KEY = "gemini_api_key"
-    private const val KEY_MODEL_NAME = "gemini_model_name"
-    private const val DEFAULT_MODEL = "gemini-2.0-flash"
-
-    fun getApiKey(context: Context): String =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_API_KEY, "") ?: ""
-
-    fun setApiKey(context: Context, key: String) =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_API_KEY, key).apply()
-
-    fun getModelName(context: Context): String =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_MODEL_NAME, DEFAULT_MODEL) ?: DEFAULT_MODEL
-
-    fun setModelName(context: Context, name: String) =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_MODEL_NAME, name).apply()
+    // 硬編碼你的 API Key 以跳過設定頁面
+    private const val API_KEY = "你的_API_KEY_放在這裡"
+    private const val MODEL_NAME = "gemini-2.0-flash"
 
     fun translateAudio(context: Context, audioData: ByteArray): String? {
-        val apiKey = getApiKey(context)
-        val modelName = getModelName(context)
-        if (apiKey.isEmpty()) return null
-
         return try {
-            val url = URL("https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}")
+            val url = URL("https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}")
             val conn = url.openConnection() as HttpURLConnection
             conn.requestMethod = "POST"
             conn.setRequestProperty("Content-Type", "application/json")

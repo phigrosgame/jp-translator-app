@@ -75,5 +75,4 @@ dependencies {
     implementation 'com.github.houbb:opencc4j:1.8.1'
 
     // JSON 處理 (Gemini 請求用)
-    implementation 'org.json:json:20231013'
 }
