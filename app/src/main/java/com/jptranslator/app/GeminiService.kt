@@ -32,7 +32,35 @@ object GeminiService {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_MODEL_NAME, name).apply()
     }
 
-    fun translateAudio(context: Context, audioData: ByteArray): String? {
+    /**
+     * AudioRecord 抓出來的是裸 PCM 資料，沒有 WAV 檔頭。
+     * Gemini 需要一份「真正的」WAV 檔（含 44 bytes RIFF/WAVE 表頭）才認得出來，
+     * 直接把裸 PCM 標成 audio/wav 送過去，Gemini 會打不開而回覆「無法處理音訊檔案」。
+     */
+    private fun pcmToWav(pcmData: ByteArray, sampleRate: Int, channels: Int = 1, bitsPerSample: Int = 16): ByteArray {
+        val byteRate = sampleRate * channels * bitsPerSample / 8
+        val blockAlign = channels * bitsPerSample / 8
+        val dataSize = pcmData.size
+        val header = java.nio.ByteBuffer.allocate(44).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+
+        header.put("RIFF".toByteArray())
+        header.putInt(36 + dataSize)
+        header.put("WAVE".toByteArray())
+        header.put("fmt ".toByteArray())
+        header.putInt(16) // Subchunk1Size (PCM)
+        header.putShort(1) // AudioFormat = 1 (PCM)
+        header.putShort(channels.toShort())
+        header.putInt(sampleRate)
+        header.putInt(byteRate)
+        header.putShort(blockAlign.toShort())
+        header.putShort(bitsPerSample.toShort())
+        header.put("data".toByteArray())
+        header.putInt(dataSize)
+
+        return header.array() + pcmData
+    }
+
+    fun translateAudio(context: Context, audioData: ByteArray, sampleRate: Int = 16000): String? {
         val apiKey = getApiKey(context)
         val modelName = getModelName(context).ifBlank { DEFAULT_MODEL }
         if (apiKey.isBlank()) {
@@ -47,7 +75,8 @@ object GeminiService {
             conn.setRequestProperty("Content-Type", "application/json")
             conn.doOutput = true
 
-            val base64Audio = Base64.encodeToString(audioData, Base64.NO_WRAP)
+            val wavData = pcmToWav(audioData, sampleRate)
+            val base64Audio = Base64.encodeToString(wavData, Base64.NO_WRAP)
 
             val jsonBody = JSONObject()
             val contents = JSONObject()
