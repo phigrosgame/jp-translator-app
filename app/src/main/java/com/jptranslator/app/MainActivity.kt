@@ -105,7 +105,7 @@ class MainActivity : AppCompatActivity() {
             // 预加载翻译模型
             TranslateHelper.init(this@MainActivity)
             // 预下载语音识别模型
-            VoiceRecogHelper.downloadModel()
+            VoiceRecogHelper.downloadModel(this@MainActivity)
         }
     }
 

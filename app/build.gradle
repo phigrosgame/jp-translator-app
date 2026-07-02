@@ -34,6 +34,12 @@ android {
     viewBinding {
         enabled = true
     }
+
+    packagingOptions {
+        resources {
+            excludes += ["META-INF/DEPENDENCIES", "META-INF/LICENSE", "META-INF/LICENSE.txt", "META-INF/NOTICE", "META-INF/NOTICE.txt"]
+        }
+    }
 }
 
 dependencies {
@@ -45,8 +51,9 @@ dependencies {
     // 协程
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
 
-    // Google MLKit 语音识别（日语）
-    implementation 'com.google.mlkit:speech-recognition:17.0.1'
+    // Vosk 離線語音辨識（日語）
+    implementation 'com.alphacephei:vosk-android:0.3.47'
+    implementation 'net.java.dev.jna:jna:5.13.0@aar'
 
     // Google MLKit 离线翻译（日→中）
     implementation 'com.google.mlkit:translate:17.0.2'

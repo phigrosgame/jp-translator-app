@@ -60,7 +60,7 @@ class AudioCaptureService : Service() {
         startForeground(NOTIFICATION_ID, createNotification())
 
         // 初始化语音识别
-        VoiceRecogHelper.init()
+        VoiceRecogHelper.init(this)
 
         // 开始捕获
         startCapture()
@@ -221,6 +221,7 @@ class AudioCaptureService : Service() {
         audioRecord = null
         mediaProjection?.stop()
         mediaProjection = null
+	VoiceRecogHelper.release() 
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
